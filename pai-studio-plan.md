@@ -3,6 +3,8 @@
 > 本文可直接下发给本地 coding agent。目标是交付可运行的集成产品，而不是只完成接口设计或 UI mock。
 >
 > 已确认决策：Gabriel-Ning/pai 是唯一机器人运行核心；Physical AI Studio 提供 Web 工作台。舍弃 Studio 原有机器人运行路径，不维护两个机器人运行后端。
+>
+> P0 已在本机完成。进度与证据在 [docs/integration/implementation-status.md](docs/integration/implementation-status.md)，基线在 [docs/integration/baseline.md](docs/integration/baseline.md)，已接受的拓扑和产物格式在 [docs/integration/adr/0001-runtime-topology.md](docs/integration/adr/0001-runtime-topology.md)。这些文档不替代本文的 P1–P6。
 
 ## 1. 任务定义与执行原则
 
@@ -23,17 +25,19 @@
 
 ## 2. 已检查的版本与事实
 
-规划基线：
+规划起草时的提交：
 
 - pai：`7e2a177e9622c9a592a79e5744310cbdf59789bf`。
 - physical-ai-studio：`e9fb4a448c78b9a9a6d379aac70d1d7548e1f4f5`。
 - 仓库 URL：`https://github.com/Gabriel-Ning/pai`、`https://github.com/open-edge-platform/physical-ai-studio`。
 
+2026-10-12 本机复核：Studio 仍是上述提交。pai 在 `dev-v4`，HEAD 为 `b3175f595465f7f254c99d5adc792e579e12fdea`，工作区另有未提交修改。按实际 HEAD 继续，不回退到起草提交。
+
 已确认：
 
-- pai 使用 Pixi、ROS 2 Jazzy、Python 3.12，分为 default、cuda13、lerobot、robomimic 环境。
+- pai 使用 Pixi、ROS 2 Jazzy、Python 3.12。环境是 `default`、`cuda13`、`lerobot`。没有 `robomimic` 环境。
 - pai RMI 是应用入口；Execution Manager 是控制资源权限与动作路由的权威层。
-- pai 已有 teleop、record、replay、local/cloud/robomimic inference、eval 与 eval_task 应用；部分应用仍以终端交互组织流程。
+- pai 应用是 `teleop`、`record`、`replay`、`eval`、`eval_task`、`convert_lerobot`、`check_runtime`。推理在 `src/policy_inference/lerobot/`，由 `eval.py` 调用。没有 local/cloud/robomimic 推理应用。`record` 与 Piper `teleop` 仍用终端按键组织流程。
 - episode_recorder 录制 MCAP；dataset_tools 转换为 LeRobot 数据集，PolicyLayout 定义语义布局，输出包含 policy_contract.json。
 - pai orchestrator/server.py 是 transport adapter 可调用的 handler 类，不是现成 FastAPI HTTP 服务；orchestrator 包当前存在 COLCON_IGNORE。
 - Studio 有独立 FastAPI 后端与 React UI；其机器人运行基于另一套 `physicalai` 包的 RobotRuntime、SharedRobot、SharedCamera，以及 Zenoh/iceoryx2。
@@ -41,7 +45,7 @@
 - Studio 后端基线 Python 要求 `>=3.12,<3.14`；UI package.json 要求 Node `>=24.2.0`、npm `>=11.14.0`。本地以实际 version pins 为准。
 - Studio 训练与模型导出可能继续依赖 `physicalai` 配置/推理工具；删除机器人运行层不等于可以直接删除整个依赖包。
 
-当前云环境只完成源码检查和 Pixi 校验安装。pai default 安装被 prefix.dev 网络 CONNECT 403 阻塞，ROS 构建、启动、Studio 安装及联合测试未完成。不得将这些步骤写成已有验证结果。本地需从真实安装验证开始。
+云环境曾只完成源码检查，pai default 安装被 prefix.dev 网络阻塞。2026-10-12 本机已有 `default` 与 `lerobot` 环境、colcon overlay、无头仿真和数据集转换的运行证据，见 `docs/integration/baseline.md`。本机没有可用 NVIDIA 驱动，训练仍未执行。
 
 ## 3. 最终产品边界
 
@@ -87,7 +91,7 @@ flowchart TB
 → 小规模训练 → 注册模型 → 契约检查 → 仿真部署 → 评测结果
 ```
 
-先锁定一个可实际启动的机器人 profile、一种 joint 动作空间与一个算法。优先 ACT + pai 可兼容 LeRobot 训练产物；但必须通过阶段 0 的加载 spike 证明兼容，不能假设 Studio 原生 ACT checkpoint 可直接被 pai LeRobot loader 使用。若不兼容，采用 Studio 原生策略训练 + 明确的 pai policy adapter，或由 Studio 编排 pai LeRobot training worker；在 ADR 中择一并执行。
+第一条组合已经锁定，见 ADR 0001：profile `fr3_pika_single_arm`，MuJoCo headless，`JointPolicy` 的 8 维关节位置。产物是 LeRobot ACT pretrained 目录加 `policy_contract.json`。Studio 原生 `physicalai.policies.act` checkpoint 不能直接交给 pai `LeRobotPolicy`。训练走 Studio 已有的 `policy_source=lerobot`，或由 Studio 调度 pai 的 `lerobot` 环境。
 
 不要因为缺少 GPU、LIBERO/RoboTwin 任务资产或某台真机而阻塞只读与采集开发。仿真 smoke 使用仓库已有、无需外部大型资产的场景；如果没有，则新增一个明确版本化的最小测试场景，不伪造 full benchmark readiness。
 
@@ -207,6 +211,8 @@ MCAP 是原始事实源，LeRobot 是派生训练数据。唯一转换路径复�
 ## 7. 分阶段实施任务
 
 ### P0 — 基线、环境与兼容性 spike
+
+状态：done（2026-10-12）。交付物在 `docs/integration/`。下面保留当时的执行要求，供对照。
 
 执行：
 
